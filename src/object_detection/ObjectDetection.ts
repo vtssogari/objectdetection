@@ -27,28 +27,45 @@ TensorFlow
 //  input_path: |eval_reader_input_path|                    {BASE_FOLDER}/workspace/{PROJECT_NAME}/tfrecord/eval/{eval.record-?????-of-00010}
 //  label_map_path: |label_map_path|                        {BASE_FOLDER}/workspace/{PROJECT_NAME}/training/label_map.pbtxt
 
-export class ObjectDetectionStructure {
+import { readdirSync, readFileSync } from 'fs';
+
+export class ObjectDetectionWorkSpace {
     workspaces: Array<WorkSpace>;
-    constructor(){
-        
+    models : Array<Model>;
+    constructor() {        
+        this.loadConfigs();
     }
 
-    loadConfigs(){
+    loadConfigs() {
+        this.models = new Array<Model>();
+        let files = readdirSync('../config_templates');
+        for (var i in files) {
+            console.log('Model Loaded: ' + files[i]);
+            let content = readFileSync(files[i]);
+            this.models.push({ name: files[i], template: content.toString()});
+        }
+    }
+
+    create(workspaceName: string, modelName: string) {
         
     }
 }
 
 export interface WorkSpace {
     name: string;
-    modelName: string;
-    template: string;
+    model: Model;
     config: Config;
 }
 
 export interface Config {
     num_classes: number;
     fine_tune_checkpoint: string;
-    train_reader_input_path:string;
+    train_reader_input_path: string;
     eval_reader_input_path: string;
     label_map_path: string;
+}
+
+export interface Model {
+    name:string;
+    template: string;
 }

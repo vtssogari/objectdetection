@@ -19,3 +19,11 @@
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+
+[remote "origin"]
+url = https://github.com/vtssogari/objectdetection.git
+fetch = +refs/heads/*:refs/remotes/origin/*
+
+[branch "master"]
+remote = origin
+merge = refs/heads/master

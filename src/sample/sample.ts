@@ -1,4 +1,5 @@
 export var sample1 = 
+`
 {
     
 model: {
@@ -28,4 +29,5 @@ model: {
     },
     label_map_path: "{BASE_FOLDER}/workspace/{PROJECT_NAME}/training/label_map.pbtxt",
   }
-};
+}
+`;

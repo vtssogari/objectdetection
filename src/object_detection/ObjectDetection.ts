@@ -32,7 +32,7 @@ import { join, basename } from 'path';
 var request = require('request');
 var progress = require('request-progress');
 
-let baseFolder: string = __dirname + "/../../..";
+let baseFolder: string = "/Tensorflow"; //__dirname + "/../../..";
 let configDir = `${__dirname}/../../../config_templates/`;
 let labelMapTemplateFile: string = `${configDir}label_map.pbtxt`;
 let pretrainedModelPath: string = `${configDir}pretrained_model_list.json`;
@@ -72,7 +72,7 @@ export class ObjectDetectionWorkSpace {
         pretrainedModeName: string = ''
     ): Promise<Project> {
         return new Promise<Project>((resolve, reject) => {
-            let models = this.models.filter(m => { return m.name == modelName });
+            let selectedModel = this.models.filter(m => { return m.name == modelName });
 
             let modelFileName = `model.ckpt`;
             let labelMapFileName = `label_map.pbtxt`;
@@ -86,7 +86,7 @@ export class ObjectDetectionWorkSpace {
             writeFileSync(label_map_path + labelMapFileName, labelMap);
 
             // write config file
-            let template = this.models[0].template;
+            let template = selectedModel[0].template;
             let config = {
                 num_classes: labelMaps.length,
                 fine_tune_checkpoint: fine_tune_checkpoint_path + modelFileName,
@@ -97,7 +97,7 @@ export class ObjectDetectionWorkSpace {
 
             let project = {
                 name: projectName,
-                model: models[0],
+                model: selectedModel[0],
                 config: config,
                 configContent: ''
             }
@@ -106,8 +106,8 @@ export class ObjectDetectionWorkSpace {
             if (pretrainedModeName != '') {
                 this.downloadPretrained(modelName, pretrainedModeName, fine_tune_checkpoint_path).then( downloadedFolder =>{
                     console.info("pretrained_model is downloaded to ", downloadedFolder);
-                    config.fine_tune_checkpoint = downloadedFolder;
-                    let configContent = this.writeConfigFile(template, config, labelMaps, label_map_path);
+                    project.config.fine_tune_checkpoint = downloadedFolder + "/" + modelFileName;
+                    let configContent = this.writeConfigFile(template, project.model.name, config, labelMaps, label_map_path);                    
                     project.configContent = configContent;
                     resolve(project);
                 }).catch(error => {
@@ -115,7 +115,8 @@ export class ObjectDetectionWorkSpace {
                     reject(error);
                 });
             } else {
-                let configContent = this.writeConfigFile(template, config, labelMaps, label_map_path);
+                project.config.fine_tune_checkpoint = "";
+                let configContent = this.writeConfigFile(template, project.model.name , config, labelMaps, label_map_path);
                 project.configContent = configContent;
                 resolve(project);
             }
@@ -141,13 +142,13 @@ export class ObjectDetectionWorkSpace {
         return { label_map_path, fine_tune_checkpoint_path, train_reader_input_path, eval_reader_input_path };
     }
 
-    private writeConfigFile(template: string, config: Config, labelMaps: LabelMap[], label_map_path: string) {
+    private writeConfigFile(template: string, modelName:string, config: Config, labelMaps: LabelMap[], label_map_path: string) {
         let configContent = template.split(`|fine_tune_checkpoint|`).join(config.fine_tune_checkpoint)
             .split(`|train_reader_input_path|`).join(config.train_reader_input_path)
             .split(`|eval_reader_input_path|`).join(config.eval_reader_input_path)
             .split(`|label_map_path|`).join(config.label_map_path)
             .split(`|num_classes|`).join(labelMaps.length + '');
-        writeFileSync(label_map_path + this.models[0].name + ".config", configContent);
+        writeFileSync(label_map_path + modelName + ".config", configContent);
         return configContent;
     }
 
@@ -246,8 +247,8 @@ function unzip(filePath: string, outPath: string): Promise<string> {
 }
 
 let o = new ObjectDetectionWorkSpace();
-let labelMaps: Array<LabelMap> = [{ id: 1, label: "cat" }, { id: 2, label: "dog" }];
-o.createProject( "my_project_name", "faster_rcnn_inception_resnet_v2_atrous", "tf_rec_input", "tf_rec_output", labelMaps, 'faster_rcnn_inception_resnet_v2_atrous_coco')
+let labelMaps: Array<LabelMap> = [{ id: 1, label: "raccoon" }];
+o.createProject( "raccoon", "ssd_inception_v2", "train.record", "test.record", labelMaps, 'ssd_inception_v2_coco')
 .then(p => {  console.info(p); });
 
 export interface Project {

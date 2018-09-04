@@ -1,4 +1,4 @@
 item {
   id: |id|
-  name: |label|
+  name: "|label|"
 }

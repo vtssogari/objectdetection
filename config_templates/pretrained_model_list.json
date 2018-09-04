@@ -25,6 +25,19 @@
                     "output": "Boxes"
                 }
             ]
+        },
+        {
+            "groupName":"ssd_inception_v2",
+            "models":[
+                {
+                    "name":"ssd_inception_v2_coco",
+                    "link":"http://download.tensorflow.org/models/object_detection/ssd_inception_v2_coco_2018_01_28.tar.gz",
+                    "speed": "42",
+                    "accuracy": "24",
+                    "output": "Boxes"
+                }
+            ]
         }
+
     ]
 }

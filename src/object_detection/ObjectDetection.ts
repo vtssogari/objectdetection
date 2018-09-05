@@ -28,6 +28,7 @@ TensorFlow
 import { readdirSync, readFileSync, writeFileSync, createWriteStream, existsSync, readdir, statSync } from 'fs';
 import * as mkdirp from 'mkdirp';
 import { join, basename } from 'path';
+import { Project, Model, PretrainedModel, LabelMap, Config} from "./Interfaces";
 
 var request = require('request');
 var progress = require('request-progress');
@@ -36,17 +37,33 @@ let baseFolder: string = "/Tensorflow"; //__dirname + "/../../..";
 let configDir = `${__dirname}/../../../config_templates/`;
 let labelMapTemplateFile: string = `${configDir}label_map.pbtxt`;
 let pretrainedModelPath: string = `${configDir}pretrained_model_list.json`;
+let modelCacheDir = `${__dirname}/../../../models/`;
+
+export interface ProjectParam {
+    projectName: string;
+    modelName: string;
+    tf_rec_train: string;
+    tf_rec_eval: string;
+    batch_size: number;
+    from_detection_checkpoint: boolean;
+    num_steps:number;
+    labelMaps: Array<LabelMap>;
+    pretrainedModeName?: string;
+}
 
 export class ObjectDetectionWorkSpace {
     projects: Array<Project>;
     models: Array<Model>;
     labelMapTemplate: string;
     pretrainedModels: Array<PretrainedModel>;
-    constructor() {
+    constructor(docker?:boolean) {
         this.loadConfigs();
     }
 
-    loadConfigs() {
+    loadConfigs(docker?:boolean) {
+        if(!docker){
+            baseFolder = __dirname + "/../../..";
+        }
         this.models = new Array<Model>();
         console.info("configDir", configDir);
 
@@ -61,26 +78,21 @@ export class ObjectDetectionWorkSpace {
             this.pretrainedModels = JSON.parse(readFileSync(pretrainedModelPath).toString()).pre_trained_models;
             this.models.push({ name: modelName, configFile: configFilePath, template: content });
         }
+        
     }
 
-    createProject(
-        projectName: string,
-        modelName: string,
-        tf_rec_train: string,
-        tf_rec_eval: string,
-        labelMaps: Array<LabelMap>,
-        pretrainedModeName: string = ''
-    ): Promise<Project> {
+    createProject(param: ProjectParam): Promise<Project> {  
+       let pretrainedModeName = param.pretrainedModeName ? param.pretrainedModeName : '';
         return new Promise<Project>((resolve, reject) => {
-            let selectedModel = this.models.filter(m => { return m.name == modelName });
+            let selectedModel = this.models.filter(m => { return m.name == param.modelName });
 
             let modelFileName = `model.ckpt`;
             let labelMapFileName = `label_map.pbtxt`;
             let { label_map_path, fine_tune_checkpoint_path,  
-                    train_reader_input_path,  eval_reader_input_path } = this.createWorkspaceFolder(projectName);
+                    train_reader_input_path,  eval_reader_input_path } = this.createWorkspaceFolder(param.projectName);
 
             // write label map
-            let labelMap = labelMaps.map(l => {
+            let labelMap = param.labelMaps.map(l => {
                 return this.labelMapTemplate.replace(`|id|`, l.id + '').replace(`|label|`, l.label);
             }).join("\n");
             writeFileSync(label_map_path + labelMapFileName, labelMap);
@@ -88,15 +100,18 @@ export class ObjectDetectionWorkSpace {
             // write config file
             let template = selectedModel[0].template;
             let config = {
-                num_classes: labelMaps.length,
+                num_classes: param.labelMaps.length,
                 fine_tune_checkpoint: fine_tune_checkpoint_path + modelFileName,
-                train_reader_input_path: train_reader_input_path + tf_rec_train,
-                eval_reader_input_path: eval_reader_input_path + tf_rec_eval,
-                label_map_path: label_map_path + labelMapFileName
+                train_reader_input_path: train_reader_input_path + param.tf_rec_train,
+                eval_reader_input_path: eval_reader_input_path + param.tf_rec_eval,
+                label_map_path: label_map_path + labelMapFileName,
+                batch_size: param.batch_size,
+                from_detection_checkpoint: param.from_detection_checkpoint,
+                num_steps: param.num_steps
             }
 
             let project = {
-                name: projectName,
+                name: param.projectName,
                 model: selectedModel[0],
                 config: config,
                 configContent: ''
@@ -104,10 +119,10 @@ export class ObjectDetectionWorkSpace {
 
             // Download pretrained model if any
             if (pretrainedModeName != '') {
-                this.downloadPretrained(modelName, pretrainedModeName, fine_tune_checkpoint_path).then( downloadedFolder =>{
+                this.downloadPretrained(param.modelName, pretrainedModeName, fine_tune_checkpoint_path).then( downloadedFolder =>{
                     console.info("pretrained_model is downloaded to ", downloadedFolder);
                     project.config.fine_tune_checkpoint = downloadedFolder + "/" + modelFileName;
-                    let configContent = this.writeConfigFile(template, project.model.name, config, labelMaps, label_map_path);                    
+                    let configContent = this.writeConfigFile(template, project.model.name, config, param.labelMaps, label_map_path);                    
                     project.configContent = configContent;
                     resolve(project);
                 }).catch(error => {
@@ -116,7 +131,7 @@ export class ObjectDetectionWorkSpace {
                 });
             } else {
                 project.config.fine_tune_checkpoint = "";
-                let configContent = this.writeConfigFile(template, project.model.name , config, labelMaps, label_map_path);
+                let configContent = this.writeConfigFile(template, project.model.name , config, param.labelMaps, label_map_path);
                 project.configContent = configContent;
                 resolve(project);
             }
@@ -147,7 +162,11 @@ export class ObjectDetectionWorkSpace {
             .split(`|train_reader_input_path|`).join(config.train_reader_input_path)
             .split(`|eval_reader_input_path|`).join(config.eval_reader_input_path)
             .split(`|label_map_path|`).join(config.label_map_path)
-            .split(`|num_classes|`).join(labelMaps.length + '');
+            .split(`|num_classes|`).join(labelMaps.length + '')
+            .split(`|num_steps|`).join(config.num_steps+ '')
+            .split(`|from_detection_checkpoint|`).join(config.from_detection_checkpoint + '')
+            .split(`|batch_size|`).join(config.batch_size + '');
+
         writeFileSync(label_map_path + modelName + ".config", configContent);
         return configContent;
     }
@@ -158,23 +177,34 @@ export class ObjectDetectionWorkSpace {
             if (pretrainedModels && pretrainedModels.length > 0) {
                 let models = pretrainedModels[0].models;
                 let matchedModel = models.filter(m => { return m.name == pretrainedModelName; });
-                if (matchedModel.length > 0) {
-                    let link = matchedModel[0].link;
-                    download(link, outputDir).then(downloadedFile => {
-                        unzip(downloadedFile, outputDir).then(unzippedDir => {
-                            resolve( unzippedDir );
+                if (matchedModel.length > 0) {                    
+                    let {link} = matchedModel[0];
+                    let fileLink = link.split("/")[link.split("/").length -1];
+                    let cacheModels = readdirSync(modelCacheDir).filter(fileName => { return(fileLink == fileName); })
+                    if(cacheModels.length == 0){
+                        // download pretrained model to cache dir then unzip it to workspace
+                        download(link, modelCacheDir).then(downloadedFile => {
+                            unzip(downloadedFile, outputDir).then(unzippedDir => {
+                                resolve( unzippedDir );
+                            }).catch(error => {
+                                reject(error);
+                            });
                         }).catch(error => {
                             reject(error);
                         });
-                    }).catch(error => {
-                        reject(error);
-                    });
+                    }else{                    
+                        console.info("found the downloaded pretrained model ", cacheModels[0]);
+                        unzip(modelCacheDir + fileLink, outputDir).then(unzippedDir => {
+                            resolve( unzippedDir );
+                        }).catch(error => {
+                            reject(error);
+                        });                        
+                    }                    
                 }
             }else{
                 reject(`pretrained model ${pretrainedModelName} is not found`);
             }
-        });
-        
+        });        
     }
 }
 
@@ -246,46 +276,4 @@ function unzip(filePath: string, outPath: string): Promise<string> {
     });
 }
 
-let o = new ObjectDetectionWorkSpace();
-let labelMaps: Array<LabelMap> = [{ id: 1, label: "raccoon" }];
-o.createProject( "raccoon", "ssd_inception_v2", "train.record", "test.record", labelMaps, 'ssd_inception_v2_coco')
-.then(p => {  console.info(p); });
 
-export interface Project {
-    name: string;
-    model: Model;
-    config: Config;
-    configContent: string;
-}
-
-export interface Config {
-    num_classes: number;
-    fine_tune_checkpoint: string;
-    train_reader_input_path: string;
-    eval_reader_input_path: string;
-    label_map_path: string;
-}
-
-export interface Model {
-    name: string;
-    configFile: string;
-    template: string;
-}
-
-export interface LabelMap {
-    id: number;
-    label: string;
-}
-
-export interface PretrainedModel {
-    groupName: string;
-    models: Array<ModelInstance>;
-}
-
-export interface ModelInstance {
-    name: string;
-    link: string;
-    speed: string;
-    accuracy: string;
-    output: string;
-}

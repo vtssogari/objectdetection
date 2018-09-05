@@ -30,7 +30,7 @@ wss.on('connection', (ws: WebSocket) => {
                     let project = matched[0];
                     let train:Train = new Train();
                     let obaBaseFolder = `${baseFolder}/models/research`
-                    train.run(project, obaBaseFolder, command.gpu_num+'', '1', ws);
+                    train.run(project, obaBaseFolder, ws, command.gpu_num+'', '1');
                 }
             }).catch(error => {
                 console.error(error);

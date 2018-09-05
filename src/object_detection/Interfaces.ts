@@ -4,6 +4,7 @@ export interface Project {
     model: Model;
     config: Config;
     configContent: string;
+    configFilePath: string;
 }
 
 export interface Config {

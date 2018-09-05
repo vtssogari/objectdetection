@@ -25,7 +25,7 @@ TensorFlow
 //  input_path: |eval_reader_input_path|                    {BASE_FOLDER}/workspace/{PROJECT_NAME}/tfrecord/eval/{eval.record-?????-of-00010}
 //  label_map_path: |label_map_path|                        {BASE_FOLDER}/workspace/{PROJECT_NAME}/training/label_map.pbtxt
 
-import { readdirSync, readFileSync, writeFileSync, createWriteStream, existsSync, readdir, statSync } from 'fs';
+import { readdirSync, readFileSync, writeFileSync, createWriteStream, existsSync, readdir, statSync, readFile, writeFile } from 'fs';
 import * as mkdirp from 'mkdirp';
 import { join, basename } from 'path';
 import { Project, Model, PretrainedModel, LabelMap, Config} from "./Interfaces";
@@ -33,7 +33,7 @@ import { Project, Model, PretrainedModel, LabelMap, Config} from "./Interfaces";
 var request = require('request');
 var progress = require('request-progress');
 
-let baseFolder: string = "/Tensorflow"; //__dirname + "/../../..";
+export var baseFolder: string = "/Tensorflow"; //__dirname + "/../../..";
 let configDir = `${__dirname}/../../../config_templates/`;
 let labelMapTemplateFile: string = `${configDir}label_map.pbtxt`;
 let pretrainedModelPath: string = `${configDir}pretrained_model_list.json`;
@@ -77,8 +77,7 @@ export class ObjectDetectionWorkSpace {
             this.labelMapTemplate = readFileSync(labelMapTemplateFile).toString();
             this.pretrainedModels = JSON.parse(readFileSync(pretrainedModelPath).toString()).pre_trained_models;
             this.models.push({ name: modelName, configFile: configFilePath, template: content });
-        }
-        
+        }        
     }
 
     createProject(param: ProjectParam): Promise<Project> {  
@@ -110,33 +109,51 @@ export class ObjectDetectionWorkSpace {
                 num_steps: param.num_steps
             }
 
-            let project = {
+            let project:Project = {
                 name: param.projectName,
                 model: selectedModel[0],
                 config: config,
-                configContent: ''
+                configContent: '',
+                configFilePath: ''
             }
 
+            let workspacePath = `${baseFolder}/workspace`;
             // Download pretrained model if any
             if (pretrainedModeName != '') {
                 this.downloadPretrained(param.modelName, pretrainedModeName, fine_tune_checkpoint_path).then( downloadedFolder =>{
                     console.info("pretrained_model is downloaded to ", downloadedFolder);
                     project.config.fine_tune_checkpoint = downloadedFolder + "/" + modelFileName;
-                    let configContent = this.writeConfigFile(template, project.model.name, config, param.labelMaps, label_map_path);                    
+                    project.configFilePath = label_map_path + project.model.name + ".config";
+                    let configContent = this.writeConfigFile(template, project.model.name, config, param.labelMaps, project.configFilePath);                    
                     project.configContent = configContent;
-                    resolve(project);
+                    
+                    writeFile(`${workspacePath}/${project.name}`, JSON.stringify(project), (err =>{
+                        if(err){
+                            reject(err);
+                        }else{
+                            resolve(project);
+                        }                        
+                    }));                    
                 }).catch(error => {
                     console.error(error);
                     reject(error);
                 });
             } else {
                 project.config.fine_tune_checkpoint = "";
-                let configContent = this.writeConfigFile(template, project.model.name , config, param.labelMaps, label_map_path);
+                project.configFilePath = label_map_path + project.model.name + ".config";
+                let configContent = this.writeConfigFile(template, project.model.name , config, param.labelMaps, project.configFilePath);
                 project.configContent = configContent;
-                resolve(project);
+                writeFile(`${workspacePath}/${project.name}`, JSON.stringify(project), (err =>{
+                    if(err){
+                        reject(err);
+                    }else{
+                        resolve(project);
+                    }                        
+                }));                  
             }
         });
     }
+
 
     private createWorkspaceFolder(projectName: string) {
         let workspacePath = `${baseFolder}/workspace/${projectName}`;
@@ -157,7 +174,7 @@ export class ObjectDetectionWorkSpace {
         return { label_map_path, fine_tune_checkpoint_path, train_reader_input_path, eval_reader_input_path };
     }
 
-    private writeConfigFile(template: string, modelName:string, config: Config, labelMaps: LabelMap[], label_map_path: string) {
+    private writeConfigFile(template: string, modelName:string, config: Config, labelMaps: LabelMap[], configFilePath: string) {
         let configContent = template.split(`|fine_tune_checkpoint|`).join(config.fine_tune_checkpoint)
             .split(`|train_reader_input_path|`).join(config.train_reader_input_path)
             .split(`|eval_reader_input_path|`).join(config.eval_reader_input_path)
@@ -167,7 +184,7 @@ export class ObjectDetectionWorkSpace {
             .split(`|from_detection_checkpoint|`).join(config.from_detection_checkpoint + '')
             .split(`|batch_size|`).join(config.batch_size + '');
 
-        writeFileSync(label_map_path + modelName + ".config", configContent);
+        writeFileSync(configFilePath, configContent);
         return configContent;
     }
 
@@ -208,6 +225,21 @@ export class ObjectDetectionWorkSpace {
     }
 }
 
+export function getProjects():Promise<Array<Project>>{
+    return new Promise<Array<Project>>( (resolve, reject)=> {
+        let projects: Array<Project> = new Array<Project>(); 
+        let workspacePath = `${baseFolder}/workspace`;
+        readdir(workspacePath, (err, files)=> {
+            files.forEach(fileName => {
+                if(fileName.endsWith(".json")){
+                    readFile(`${workspacePath}/${fileName}`, (err, data) =>{
+                        projects.push(JSON.parse(data.toString()));
+                    });
+                }
+            })
+        })
+    });        
+}
 
 function download(link: string, outputDir: string): Promise<string> {
     return new Promise<string>((resolve, reject) => {
